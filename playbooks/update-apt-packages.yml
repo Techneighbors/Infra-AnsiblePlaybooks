@@ -1,12 +1,14 @@
 ---
-- hosts: all
-  become: true
+- name: Update and upgrade apt packages
+  hosts: all
+
   tasks:
-    - name: Update apt packages
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
+    - name: Update packages with apt
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Upgrade packages with apt
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
         upgrade: dist
-        autoremove: yes
-        autoclean: yes
-        state: latest
