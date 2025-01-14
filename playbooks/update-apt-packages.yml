@@ -5,12 +5,14 @@
   tasks:
     - name: Update packages with apt
       become: yes
+      become_user: root
       when: ansible_pkg_mgr == 'apt'
       ansible.builtin.apt:
         update_cache: true
 
     - name: Upgrade packages with apt
       become: yes
+      become_user: root
       when: ansible_pkg_mgr == 'apt'
       ansible.builtin.apt:
         upgrade: dist
