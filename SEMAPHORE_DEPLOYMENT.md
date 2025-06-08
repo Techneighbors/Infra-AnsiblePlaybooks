@@ -149,17 +149,17 @@ Ensure your repository has this structure:
 3. Configure:
    - **Name**: `Inventory Discovery`
    - **Playbook**: `playbooks/inventory-management.yml`
-   - **Inventory**: `Static Inventory`
-   - **Repository**: `Homelab-Main`
-   - **Variable Groups**: Select both `Homelab Production Variables` and `Homelab Secrets`
-   - **Extra Variables** (JSON format):
-   ```json
-   {
-     "auto_update_static": true,
-     "backup_old_inventory": true,
-     "discovery_networks": ["192.168.1.0/24", "10.2.10.0/24"]
-   }
-   ```
+   - **Inventory**: `Static Inventory` (uses `inventory/example-hosts.yml`)
+   - **Repository**: Select your repository
+   - **Variable Groups**: Select `Production` (your Variable Group)
+   - **Survey Variables** (click "+ Add variable" for each):
+     - `auto_update_static` (Boolean, default: true)
+     - `backup_old_inventory` (Boolean, default: true)
+     - `discovery_networks` (Text, default: `["192.168.1.0/24", "10.2.10.0/24"]`)
+     - `discovery_timeout` (Number, default: 3)
+     - `discovery_max_workers` (Number, default: 50)
+
+**Note**: This template runs on `localhost` (via Static Inventory) to discover your network and **update the DYNAMIC inventory** (`inventory/dynamic-hosts.yml`). It will scan the specified networks and find active hosts automatically. The Static Inventory remains unchanged as a stable fallback.
 
 ### 5.2 Security Hardening Template
 
@@ -189,7 +189,7 @@ Ensure your repository has this structure:
    - **Extra Variables** (JSON format):
    ```json
    {
-     "docker_privileged_users": ["admin", "ubuntu", "rockhelljumper"],
+     "docker_privileged_users": ["admin", "ubuntu", "kyle7"],
      "compose_version": "2.24.5"
    }
    ```
