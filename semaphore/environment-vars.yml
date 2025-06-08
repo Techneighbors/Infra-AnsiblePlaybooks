@@ -1,0 +1,49 @@
+# Environment Variables for Semaphore Deployment
+# Copy these values into your Semaphore Environment configuration
+
+# Global Configuration
+ANSIBLE_HOST_KEY_CHECKING: "False"
+ANSIBLE_TIMEOUT: "30"
+ANSIBLE_GATHERING: "smart"
+ANSIBLE_STDOUT_CALLBACK: "yaml"
+
+# Homelab Specific Variables
+HOMELAB_ADMIN_USER: "admin"
+HOMELAB_SSH_PORT: "22"
+HOMELAB_TIMEZONE: "America/New_York"
+
+# Security Configuration
+SSH_ROOT_LOGIN: "no"
+SSH_PASSWORD_AUTHENTICATION: "no"
+SSH_MAX_TRIES: "3"
+
+# Docker Configuration
+DOCKER_PRIVILEGED_USERS: "['admin', 'ubuntu']"
+COMPOSE_VERSION: "2.24.5"
+
+# Backup Configuration
+BACKUP_SERVICE_USER: "backup"
+BACKUP_REPOSITORY: "/backup/restic-repo"
+BACKUP_SCHEDULE: "0 2 * * *"
+BACKUP_KEEP_POLICY: "--keep-daily 7 --keep-weekly 4 --keep-monthly 6"
+
+# Monitoring Configuration
+PROMETHEUS_VERSION: "2.48.1"
+GRAFANA_VERSION: "10.2.3"
+GRAFANA_PORT: "3000"
+PROMETHEUS_PORT: "9090"
+NODE_EXPORTER_PORT: "9100"
+
+# Network Discovery
+DISCOVERY_NETWORKS: "['192.168.1.0/24', '192.168.2.0/24']"
+DISCOVERY_TIMEOUT: "3"
+DISCOVERY_MAX_WORKERS: "50"
+
+# Notification Settings (Optional)
+NOTIFICATION_EMAIL: "admin@homelab.local"
+SMTP_SERVER: "localhost"
+SMTP_PORT: "587"
+
+# Semaphore Integration
+SEMAPHORE_PROJECT_NAME: "Homelab Infrastructure"
+SEMAPHORE_WEBHOOK_URL: "https://your-semaphore-instance.com/api/project/1/tasks"

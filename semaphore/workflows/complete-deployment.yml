@@ -1,0 +1,108 @@
+# Complete Homelab Deployment Workflow
+# This can be imported into Semaphore as a workflow template
+
+name: "Complete Homelab Infrastructure Deployment"
+description: "Deploy and configure complete homelab infrastructure"
+
+workflow:
+  stages:
+    - name: "Discovery and Preparation"
+      description: "Discover hosts and prepare environment"
+      templates:
+        - name: "Inventory Discovery"
+          playbook: "playbooks/inventory-management.yml"
+          inventory: "localhost"
+          environment: "Production"
+          options:
+            tags: ["discovery", "setup"]
+            extra_vars:
+              auto_update_static: true
+              backup_old_inventory: true
+
+    - name: "Security Foundation"
+      description: "Apply security hardening and system updates"
+      depends_on: ["Discovery and Preparation"]
+      templates:
+        - name: "Security Hardening"
+          playbook: "playbooks/security-hardening.yml"
+          inventory: "Dynamic Inventory"
+          environment: "Production"
+          options:
+            tags: ["ssh", "firewall", "fail2ban"]
+
+        - name: "System Updates"
+          playbook: "playbooks/update-apt-packages.yml"
+          inventory: "Dynamic Inventory"
+          environment: "Production"
+          options:
+            extra_vars:
+              apt_upgrade_type: "safe"
+              apt_autoremove: true
+
+    - name: "Core Services"
+      description: "Deploy core infrastructure services"
+      depends_on: ["Security Foundation"]
+      parallel: true
+      templates:
+        - name: "Docker Installation"
+          playbook: "playbooks/docker-setup.yml"
+          inventory: "Dynamic Inventory"
+          environment: "Production"
+          host_limit: "docker_hosts"
+
+        - name: "Backup Solution"
+          playbook: "playbooks/backup-setup.yml"
+          inventory: "Dynamic Inventory"
+          environment: "Production"
+          options:
+            extra_vars:
+              backup_schedule: "0 2 * * *"
+              backup_repository: "/backup/restic-repo"
+
+    - name: "Monitoring and Observability"
+      description: "Deploy monitoring stack"
+      depends_on: ["Core Services"]
+      templates:
+        - name: "Monitoring Stack"
+          playbook: "playbooks/monitoring-setup.yml"
+          inventory: "Dynamic Inventory"
+          environment: "Production"
+          host_limit: "monitoring"
+          options:
+            extra_vars:
+              grafana_admin_password: "{{ GRAFANA_ADMIN_PASSWORD }}"
+              prometheus_port: "9090"
+              grafana_port: "3000"
+
+    - name: "Validation and Reporting"
+      description: "Validate deployment and generate reports"
+      depends_on: ["Monitoring and Observability"]
+      templates:
+        - name: "Deployment Validation"
+          playbook: "playbooks/validation-checks.yml"
+          inventory: "Dynamic Inventory"
+          environment: "Production"
+
+        - name: "Generate Reports"
+          playbook: "playbooks/inventory-management.yml"
+          inventory: "localhost"
+          environment: "Production"
+          options:
+            tags: ["report"]
+
+notifications:
+  on_success:
+    webhook: "{{ SEMAPHORE_WEBHOOK_URL }}"
+    email: "{{ NOTIFICATION_EMAIL }}"
+    message: "Homelab infrastructure deployment completed successfully"
+
+  on_failure:
+    webhook: "{{ SEMAPHORE_WEBHOOK_URL }}"
+    email: "{{ NOTIFICATION_EMAIL }}"
+    message: "Homelab infrastructure deployment failed"
+    include_logs: true
+
+schedule:
+  # Run complete deployment weekly on Sunday at 2 AM
+  cron: "0 2 * * 0"
+  enabled: false # Enable manually after initial setup

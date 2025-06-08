@@ -1,41 +1,86 @@
 ---
-# Example Ansible inventory file
-# Copy this file and customize for your environment
+# Static Ansible inventory file for homelab
+# This serves as a fallback when dynamic discovery isn't working
 
 all:
   children:
-    production:
+    homelab:
+      children:
+        webservers:
+          hosts:
+            # Add your web servers here
+
+        databases:
+          hosts:
+            # Add your database servers here
+
+        monitoring:
+          hosts:
+            # Add your monitoring servers here
+
+        docker_hosts:
+          hosts:
+            # Add your Docker hosts here
+
       hosts:
-        web-server-01:
+        # Your 19 hosts - update hostnames and organize into appropriate groups above
+        host01:
+          ansible_host: 10.2.10.36
+          ansible_user: kyle7
+        host02:
+          ansible_host: 10.2.10.52
+          ansible_user: kyle7
+        host03:
+          ansible_host: 10.2.10.54
+          ansible_user: kyle7
+        host04:
+          ansible_host: 10.2.10.58
+          ansible_user: kyle7
+        host05:
+          ansible_host: 10.2.10.47
+          ansible_user: kyle7
+        host06:
+          ansible_host: 10.2.10.69
+          ansible_user: kyle7
+        host07:
+          ansible_host: 10.2.10.59
+          ansible_user: kyle7
+        host08:
+          ansible_host: 10.2.10.15
+          ansible_user: kyle7
+        host09:
+          ansible_host: 10.2.10.61
+          ansible_user: kyle7
+        host10:
+          ansible_host: 10.2.10.62
+          ansible_user: kyle7
+        host11:
+          ansible_host: 10.2.10.32
+          ansible_user: kyle7
+        host12:
+          ansible_host: 10.2.10.57
+          ansible_user: kyle7
+        host13:
+          ansible_host: 10.2.10.163
+          ansible_user: kyle7
+        host14:
+          ansible_host: 10.2.10.154
+          ansible_user: kyle7
+        host15:
+          ansible_host: 10.2.10.157
+          ansible_user: kyle7
+        host16:
+          ansible_host: 10.2.10.162
+          ansible_user: kyle7
+        host17:
           ansible_host: 192.168.1.10
-          ansible_user: admin
-        web-server-02:
-          ansible_host: 192.168.1.11
-          ansible_user: admin
-        db-server-01:
-          ansible_host: 192.168.1.20
-          ansible_user: admin
-
-    staging:
-      hosts:
-        staging-web:
-          ansible_host: 192.168.1.50
-          ansible_user: ubuntu
-        staging-db:
-          ansible_host: 192.168.1.51
-          ansible_user: ubuntu
-
-    # Group servers by function
-    webservers:
-      hosts:
-        web-server-01:
-        web-server-02:
-        staging-web:
-
-    databases:
-      hosts:
-        db-server-01:
-        staging-db:
+          ansible_user: kyle7
+        host18:
+          ansible_host: 192.168.1.111
+          ansible_user: kyle7
+        host19:
+          ansible_host: 192.168.1.125
+          ansible_user: kyle7
 
   vars:
     # Global variables for all hosts

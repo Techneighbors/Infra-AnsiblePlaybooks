@@ -1,0 +1,46 @@
+[local]
+localhost ansible_connection=local
+
+[homelab:children]
+webservers
+databases
+monitoring
+docker_hosts
+
+[webservers]
+# Add your web servers here - example:
+# web1.homelab.local ansible_host=192.168.1.10
+
+[databases]
+# Add your database servers here - example:
+# db1.homelab.local ansible_host=192.168.1.11
+
+[monitoring]
+# Add your monitoring servers here - example:
+# monitor1.homelab.local ansible_host=192.168.1.12
+
+[docker_hosts]
+# Add your Docker hosts here - examples:
+# docker1.homelab.local ansible_host=192.168.1.13
+# docker2.homelab.local ansible_host=192.168.1.14
+
+# Your 19 hosts can be distributed across these groups:
+# Example assignments based on your IP ranges:
+
+# 10.2.10.x hosts (adjust as needed)
+server1.homelab.local ansible_host=10.2.10.36
+server2.homelab.local ansible_host=10.2.10.52
+server3.homelab.local ansible_host=10.2.10.54
+server4.homelab.local ansible_host=10.2.10.58
+server5.homelab.local ansible_host=10.2.10.47
+
+# 192.168.1.x hosts
+server6.homelab.local ansible_host=192.168.1.10
+server7.homelab.local ansible_host=192.168.1.111
+server8.homelab.local ansible_host=192.168.1.125
+
+[homelab:vars]
+ansible_user=rockhelljumper
+ansible_ssh_private_key_file=/path/to/ssh/key
+ansible_python_interpreter=/usr/bin/python3
+ansible_ssh_common_args='-o StrictHostKeyChecking=no' 

@@ -1,0 +1,55 @@
+{
+  "name": "Homelab Infrastructure",
+  "description": "Automated homelab infrastructure management with Ansible",
+  "repository": {
+    "git_url": "https://github.com/yourusername/Infra-AnsiblePlaybooks.git",
+    "git_branch": "main"
+  },
+  "environments": [
+    {
+      "name": "Production",
+      "description": "Production homelab environment"
+    },
+    {
+      "name": "Development", 
+      "description": "Development/testing environment"
+    }
+  ],
+  "templates": [
+    {
+      "name": "Security Hardening",
+      "playbook": "playbooks/security-hardening.yml",
+      "description": "Apply security hardening to all hosts"
+    },
+    {
+      "name": "System Updates",
+      "playbook": "playbooks/update-apt-packages.yml", 
+      "description": "Update and upgrade system packages"
+    },
+    {
+      "name": "Docker Setup",
+      "playbook": "playbooks/docker-setup.yml",
+      "description": "Install and configure Docker"
+    },
+    {
+      "name": "Backup Setup",
+      "playbook": "playbooks/backup-setup.yml",
+      "description": "Setup automated backup solution"
+    },
+    {
+      "name": "Monitoring Stack",
+      "playbook": "playbooks/monitoring-setup.yml",
+      "description": "Deploy Prometheus and Grafana monitoring"
+    },
+    {
+      "name": "Complete Infrastructure",
+      "playbook": "playbooks/homelab-complete-setup.yml",
+      "description": "Deploy complete homelab infrastructure"
+    },
+    {
+      "name": "Inventory Discovery",
+      "playbook": "playbooks/inventory-management.yml",
+      "description": "Discover and organize hosts automatically"
+    }
+  ]
+} 

@@ -1,0 +1,174 @@
+---
+- name: Validate Homelab Infrastructure Deployment
+  hosts: all
+  gather_facts: true
+
+  vars:
+    validation_results: []
+    required_services:
+      - ssh
+      - systemd-resolved
+    optional_services:
+      - docker
+      - prometheus
+      - grafana-server
+      - node_exporter
+      - fail2ban
+
+    required_ports:
+      - 22 # SSH
+    monitoring_ports:
+      - 9090 # Prometheus
+      - 3000 # Grafana
+      - 9100 # Node Exporter
+
+  tasks:
+    - name: Check system uptime
+      ansible.builtin.command: uptime -p
+      register: system_uptime
+      changed_when: false
+      tags: basic
+
+    - name: Check disk space
+      ansible.builtin.shell: df -h / | tail -1 | awk '{print $5}' | sed 's/%//'
+      register: disk_usage
+      changed_when: false
+      tags: basic
+
+    - name: Validate SSH access
+      ansible.builtin.ping:
+      register: ssh_test
+      tags: connectivity
+
+    - name: Check required services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+      register: service_check
+      loop: "{{ required_services }}"
+      failed_when: false
+      tags: services
+
+    - name: Check optional services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+      register: optional_service_check
+      loop: "{{ optional_services }}"
+      failed_when: false
+      tags: services
+
+    - name: Check if firewall is active
+      ansible.builtin.command: ufw status
+      register: firewall_status
+      changed_when: false
+      failed_when: false
+      tags: security
+
+    - name: Check fail2ban status
+      ansible.builtin.command: fail2ban-client status
+      register: fail2ban_status
+      changed_when: false
+      failed_when: false
+      tags: security
+
+    - name: Test Docker functionality
+      ansible.builtin.command: docker --version
+      register: docker_test
+      changed_when: false
+      failed_when: false
+      when: "'docker' in group_names or 'docker_hosts' in group_names"
+      tags: docker
+
+    - name: Check monitoring endpoints
+      ansible.builtin.uri:
+        url: "http://{{ ansible_default_ipv4.address }}:{{ item }}"
+        method: GET
+        timeout: 5
+      register: monitoring_endpoints
+      loop: "{{ monitoring_ports }}"
+      failed_when: false
+      when: "'monitoring' in group_names"
+      tags: monitoring
+
+    - name: Check backup configuration
+      ansible.builtin.stat:
+        path: /usr/local/bin/homelab-backup.sh
+      register: backup_script
+      tags: backup
+
+    - name: Test backup script
+      ansible.builtin.command: /usr/local/bin/homelab-backup.sh --dry-run
+      register: backup_test
+      changed_when: false
+      failed_when: false
+      when: backup_script.stat.exists
+      tags: backup
+
+    - name: Generate validation report
+      ansible.builtin.set_fact:
+        validation_summary:
+          hostname: "{{ ansible_hostname }}"
+          ip_address: "{{ ansible_default_ipv4.address }}"
+          uptime: "{{ system_uptime.stdout }}"
+          disk_usage: "{{ disk_usage.stdout }}%"
+          ssh_access: "{{ 'OK' if ssh_test is succeeded else 'FAILED' }}"
+          firewall_active: "{{ 'YES' if 'Status: active' in firewall_status.stdout else 'NO' }}"
+          fail2ban_active: "{{ 'YES' if fail2ban_status.rc == 0 else 'NO' }}"
+          docker_installed: "{{ 'YES' if docker_test.rc == 0 else 'NO' }}"
+          backup_configured: "{{ 'YES' if backup_script.stat.exists else 'NO' }}"
+          services_running: "{{ service_check.results | selectattr('status.ActiveState', 'equalto', 'active') | list | length }}/{{ required_services | length }}"
+          monitoring_endpoints: "{{ monitoring_endpoints.results | selectattr('status', 'equalto', 200) | list | length if monitoring_endpoints is defined else 0 }}"
+      tags: report
+
+    - name: Display validation results
+      ansible.builtin.debug:
+        msg:
+          - "=== Validation Results for {{ ansible_hostname }} ==="
+          - "IP Address: {{ validation_summary.ip_address }}"
+          - "Uptime: {{ validation_summary.uptime }}"
+          - "Disk Usage: {{ validation_summary.disk_usage }}"
+          - "SSH Access: {{ validation_summary.ssh_access }}"
+          - "Firewall Active: {{ validation_summary.firewall_active }}"
+          - "Fail2ban Active: {{ validation_summary.fail2ban_active }}"
+          - "Docker Installed: {{ validation_summary.docker_installed }}"
+          - "Backup Configured: {{ validation_summary.backup_configured }}"
+          - "Services Running: {{ validation_summary.services_running }}"
+          - "Monitoring Endpoints: {{ validation_summary.monitoring_endpoints }}"
+      tags: report
+
+    - name: Check critical issues
+      ansible.builtin.fail:
+        msg: "Critical validation failures detected on {{ ansible_hostname }}"
+      when:
+        - validation_summary.ssh_access == 'FAILED' or
+          validation_summary.disk_usage | int > 90 or
+          validation_summary.services_running.split('/')[0] | int == 0
+      tags: validation
+
+    - name: Generate JSON report
+      ansible.builtin.copy:
+        content: "{{ validation_summary | to_nice_json }}"
+        dest: "/tmp/validation-{{ ansible_hostname }}-{{ ansible_date_time.epoch }}.json"
+        mode: "0644"
+      tags: report
+
+  post_tasks:
+    - name: Collect all validation reports
+      ansible.builtin.fetch:
+        src: "/tmp/validation-{{ ansible_hostname }}-{{ ansible_date_time.epoch }}.json"
+        dest: "validation-reports/"
+        flat: true
+      tags: collect
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Infrastructure Validation Complete ==="
+          - "Validated {{ ansible_play_hosts | length }} hosts"
+          - "Check validation-reports/ directory for detailed results"
+          - "Next steps:"
+          - "1. Review any failed validations"
+          - "2. Check monitoring dashboards"
+          - "3. Test backup functionality"
+          - "4. Verify security configurations"
+      run_once: true
+      tags: always

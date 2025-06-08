@@ -1,0 +1,91 @@
+# Template Configuration with Embedded Environment Variables
+# Use this when Semaphore doesn't have a separate Environment section
+
+templates:
+  - name: "Security Hardening"
+    playbook: "playbooks/security-hardening.yml"
+    inventory: "Dynamic Inventory"
+    environment_variables:
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+      ANSIBLE_TIMEOUT: "30"
+      ANSIBLE_GATHERING: "smart"
+      ANSIBLE_STDOUT_CALLBACK: "yaml"
+      SSH_PORT: "22"
+      SSH_ROOT_LOGIN: "no"
+      SSH_PASSWORD_AUTHENTICATION: "no"
+      SSH_MAX_TRIES: "3"
+    extra_variables:
+      ssh_port: 22
+      ssh_permit_root_login: "no"
+      ssh_password_auth: "no"
+      ssh_max_auth_tries: 3
+      firewall_allowed_ports:
+        - "22/tcp"
+        - "80/tcp"
+        - "443/tcp"
+
+  - name: "Docker Setup"
+    playbook: "playbooks/docker-setup.yml"
+    inventory: "Dynamic Inventory"
+    environment_variables:
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+      DOCKER_PRIVILEGED_USERS: "['admin', 'ubuntu']"
+      COMPOSE_VERSION: "2.24.5"
+    extra_variables:
+      docker_privileged_users:
+        - admin
+        - ubuntu
+      compose_version: "2.24.5"
+
+  - name: "Monitoring Stack"
+    playbook: "playbooks/monitoring-setup.yml"
+    inventory: "Dynamic Inventory"
+    environment_variables:
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+      GRAFANA_PORT: "3000"
+      PROMETHEUS_PORT: "9090"
+      NODE_EXPORTER_PORT: "9100"
+    extra_variables:
+      grafana_port: 3000
+      prometheus_port: 9090
+      node_exporter_port: 9100
+      grafana_admin_password: "{{ GRAFANA_ADMIN_PASSWORD }}"
+
+  - name: "Backup Setup"
+    playbook: "playbooks/backup-setup.yml"
+    inventory: "Dynamic Inventory"
+    environment_variables:
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+      BACKUP_SCHEDULE: "0 2 * * *"
+      BACKUP_REPOSITORY: "/backup/restic-repo"
+    extra_variables:
+      backup_schedule: "0 2 * * *"
+      backup_repository: "/backup/restic-repo"
+      backup_password: "{{ BACKUP_PASSWORD }}"
+
+  - name: "System Updates"
+    playbook: "playbooks/update-apt-packages.yml"
+    inventory: "Dynamic Inventory"
+    environment_variables:
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+      ANSIBLE_TIMEOUT: "60"
+    extra_variables:
+      apt_upgrade_type: "safe"
+      apt_autoremove: true
+      apt_autoclean: true
+
+  - name: "Inventory Discovery"
+    playbook: "playbooks/inventory-management.yml"
+    inventory: "localhost"
+    environment_variables:
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+      DISCOVERY_NETWORKS: "['192.168.1.0/24']"
+      DISCOVERY_TIMEOUT: "3"
+      DISCOVERY_MAX_WORKERS: "50"
+    extra_variables:
+      auto_update_static: true
+      backup_old_inventory: true
+      discovery_networks:
+        - "192.168.1.0/24"
+        - "10.2.10.0/24"
+      discovery_timeout: 3
