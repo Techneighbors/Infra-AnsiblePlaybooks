@@ -83,8 +83,8 @@
         cmd: "python3 {{ discovery_script }} --save {{ discovered_inventory }} --config {{ discovery_config }}"
       register: discovery_result
       changed_when: discovery_result.rc == 0
-      failed_when: discovery_result.rc != 0
-      tags: [discovery, always]
+      failed_when: false # Don't fail on discovery errors, just continue
+      tags: always
 
     - name: Display discovery results
       ansible.builtin.debug:
@@ -95,7 +95,26 @@
           - "STDERR: {{ discovery_result.stderr | default('No errors') }}"
           - "Command: python3 {{ discovery_script }} --save {{ discovered_inventory }} --config {{ discovery_config }}"
       when: discovery_result is defined
-      tags: [discovery, always]
+      tags: always
+
+    - name: Test basic network connectivity
+      ansible.builtin.command:
+        cmd: "ping -c 2 {{ item }}"
+      register: ping_results
+      ignore_errors: true
+      loop:
+        - "192.168.1.10"
+        - "10.2.10.36"
+      tags: always
+
+    - name: Display network connectivity test
+      ansible.builtin.debug:
+        msg:
+          - "=== Network Connectivity Test ==="
+          - "Ping results: {{ ping_results.results | map(attribute='rc') | list }}"
+          - "Can reach 192.168.1.10: {{ ping_results.results[0].rc == 0 }}"
+          - "Can reach 10.2.10.36: {{ ping_results.results[1].rc == 0 }}"
+      tags: always
 
     - name: Check if discovered inventory exists
       ansible.builtin.stat:
