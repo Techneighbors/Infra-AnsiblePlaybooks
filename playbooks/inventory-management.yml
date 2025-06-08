@@ -83,18 +83,41 @@
         cmd: "python3 {{ discovery_script }} --save {{ discovered_inventory }} --config {{ discovery_config }}"
       register: discovery_result
       changed_when: discovery_result.rc == 0
-      tags: discovery
+      failed_when: discovery_result.rc != 0
+      tags: [discovery, always]
 
     - name: Display discovery results
       ansible.builtin.debug:
-        msg: "{{ discovery_result.stdout_lines }}"
-      when: discovery_result.stdout_lines is defined
-      tags: discovery
+        msg:
+          - "=== Discovery Command Results ==="
+          - "Return Code: {{ discovery_result.rc | default('undefined') }}"
+          - "STDOUT: {{ discovery_result.stdout | default('No output') }}"
+          - "STDERR: {{ discovery_result.stderr | default('No errors') }}"
+          - "Command: python3 {{ discovery_script }} --save {{ discovered_inventory }} --config {{ discovery_config }}"
+      when: discovery_result is defined
+      tags: [discovery, always]
+
+    - name: Check if discovered inventory exists
+      ansible.builtin.stat:
+        path: "{{ discovered_inventory }}"
+      register: discovered_file_check
+      tags: analysis
 
     - name: Load discovered inventory
       ansible.builtin.include_vars:
         file: "{{ discovered_inventory }}"
         name: discovered_hosts
+      when: discovered_file_check.stat.exists
+      tags: analysis
+
+    - name: Create empty inventory if discovery failed
+      ansible.builtin.set_fact:
+        discovered_hosts:
+          _meta:
+            hostvars: {}
+          all:
+            children: []
+      when: not discovered_file_check.stat.exists
       tags: analysis
 
     - name: Load manual inventory for merging
