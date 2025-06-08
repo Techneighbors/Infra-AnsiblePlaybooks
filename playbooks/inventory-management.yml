@@ -83,8 +83,7 @@
         cmd: "python3 {{ discovery_script }} --save {{ discovered_inventory }} --config {{ discovery_config }}"
       register: discovery_result
       changed_when: discovery_result.rc == 0
-      failed_when: false # Don't fail on discovery errors, just continue
-      tags: always
+      failed_when: false
 
     - name: Display discovery results
       ansible.builtin.debug:
