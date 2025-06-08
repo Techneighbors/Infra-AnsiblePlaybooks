@@ -12,7 +12,9 @@ all:
 
         databases:
           hosts:
-            # Add your database servers here
+            host01:
+              ansible_host: 10.2.10.15
+              ansible_user: kyle7
 
         monitoring:
           hosts:
