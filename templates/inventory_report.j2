@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Homelab Inventory Report</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            display: block;
+        }
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        .section h2 {
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        .hosts-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .hosts-table th,
+        .hosts-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .hosts-table th {
+            background-color: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+        .hosts-table tr:hover {
+            background-color: #f5f5f5;
+        }
+        .service-tag {
+            background: #e3f2fd;
+            color: #1976d2;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            margin: 2px;
+            display: inline-block;
+        }
+        .group-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 0.9em;
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+        .no-hosts {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏠 Homelab Inventory Report</h1>
+            <p>Automated host discovery and organization</p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span class="stat-number">{{ report_data.stats.total_hosts }}</span>
+                <span class="stat-label">Total Hosts</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number">{{ report_data.stats.groups | length }}</span>
+                <span class="stat-label">Host Groups</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number">{{ report_data.stats.discovered_services | length }}</span>
+                <span class="stat-label">Services Found</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number">{{ ansible_date_time.hour }}:{{ ansible_date_time.minute }}</span>
+                <span class="stat-label">Discovery Time</span>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📊 Discovery Summary</h2>
+            <div class="group-section">
+                <h3>Detected Services</h3>
+                <p>
+                    {% for service in report_data.stats.discovered_services %}
+                    <span class="service-tag">{{ service }}</span>
+                    {% endfor %}
+                </p>
+            </div>
+            
+            <div class="group-section">
+                <h3>Host Groups</h3>
+                <p>
+                    {% for group in report_data.stats.groups %}
+                    <span class="service-tag">{{ group }}</span>
+                    {% endfor %}
+                </p>
+            </div>
+        </div>
+
+        {% for group_name, group_data in report_data.inventory.items() %}
+        {% if group_name != '_meta' and group_name != 'all' and group_data.hosts %}
+        <div class="section">
+            <h2>🖥️ {{ group_name | title }} ({{ group_data.hosts | length }} hosts)</h2>
+            
+            <table class="hosts-table">
+                <thead>
+                    <tr>
+                        <th>Host</th>
+                        <th>IP Address</th>
+                        <th>Services</th>
+                        <th>Open Ports</th>
+                        <th>Last Seen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for host_name in group_data.hosts %}
+                    {% set host_vars = report_data.inventory._meta.hostvars[host_name] %}
+                    <tr>
+                        <td><strong>{{ host_name }}</strong></td>
+                        <td>{{ host_vars.ansible_host }}</td>
+                        <td>
+                            {% for service in host_vars.detected_services %}
+                            <span class="service-tag">{{ service }}</span>
+                            {% endfor %}
+                        </td>
+                        <td>{{ host_vars.open_ports | join(', ') }}</td>
+                        <td>{{ host_vars.discovery_timestamp | regex_replace('T.*', '') }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% endfor %}
+
+        {% if report_data.stats.total_hosts == 0 %}
+        <div class="section">
+            <div class="no-hosts">
+                <h2>🔍 No Hosts Discovered</h2>
+                <p>No hosts with SSH access were found in the configured networks.</p>
+                <p>Check your network configuration in <code>{{ report_data.discovery_config }}</code></p>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="section">
+            <h2>⚙️ Configuration</h2>
+            <div class="group-section">
+                <h3>Discovery Settings</h3>
+                <table class="hosts-table">
+                    <tr><td><strong>Config File</strong></td><td>{{ report_data.discovery_config }}</td></tr>
+                    <tr><td><strong>Discovery Time</strong></td><td>{{ report_data.stats.discovery_timestamp }}</td></tr>
+                    <tr><td><strong>Ansible User</strong></td><td>{{ ansible_user | default('admin') }}</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <div class="timestamp">
+            <p>Report generated on {{ ansible_date_time.date }} at {{ ansible_date_time.time }}</p>
+            <p>🤖 Automated by Ansible homelab infrastructure</p>
+        </div>
+    </div>
+</body>
+</html> 

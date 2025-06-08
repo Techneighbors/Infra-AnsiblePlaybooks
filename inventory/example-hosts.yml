@@ -1,0 +1,43 @@
+---
+# Example Ansible inventory file
+# Copy this file and customize for your environment
+
+all:
+  children:
+    production:
+      hosts:
+        web-server-01:
+          ansible_host: 192.168.1.10
+          ansible_user: admin
+        web-server-02:
+          ansible_host: 192.168.1.11
+          ansible_user: admin
+        db-server-01:
+          ansible_host: 192.168.1.20
+          ansible_user: admin
+
+    staging:
+      hosts:
+        staging-web:
+          ansible_host: 192.168.1.50
+          ansible_user: ubuntu
+        staging-db:
+          ansible_host: 192.168.1.51
+          ansible_user: ubuntu
+
+    # Group servers by function
+    webservers:
+      hosts:
+        web-server-01:
+        web-server-02:
+        staging-web:
+
+    databases:
+      hosts:
+        db-server-01:
+        staging-db:
+
+  vars:
+    # Global variables for all hosts
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+    ansible_python_interpreter: /usr/bin/python3

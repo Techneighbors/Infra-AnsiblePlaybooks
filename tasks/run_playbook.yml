@@ -1,0 +1,26 @@
+---
+# Task file for running individual playbooks
+- name: "{{ phase.name }} - {{ phase.description }}"
+  ansible.builtin.shell: |
+    ansible-playbook \
+      -i {{ target_inventory }} \
+      playbooks/{{ phase.playbook }} \
+      {{ '--check' if check_mode else '' }} \
+      --extra-vars "ansible_python_interpreter=/usr/bin/python3"
+  register: playbook_result
+  failed_when: playbook_result.rc != 0
+  delegate_to: localhost
+  tags:
+    - "{{ phase.name | lower | replace(' ', '_') }}"
+
+- name: "Display {{ phase.name }} results"
+  ansible.builtin.debug:
+    msg:
+      - "Phase: {{ phase.name }}"
+      - "Status: {{ 'SUCCESS' if playbook_result.rc == 0 else 'FAILED' }}"
+      - "Return Code: {{ playbook_result.rc }}"
+      - "{{ 'Output:' if playbook_result.stdout else '' }}"
+      - "{{ playbook_result.stdout if playbook_result.stdout else '' }}"
+  when: playbook_result is defined
+  tags:
+    - "{{ phase.name | lower | replace(' ', '_') }}"

@@ -1,0 +1,97 @@
+# Dynamic Inventory Configuration for Homelab
+# Configure network discovery and host organization
+
+# Networks to scan for hosts
+networks:
+  - "192.168.1.0/24" # Main home network
+  - "192.168.2.0/24" # IoT/guest network
+  - "10.0.0.0/24" # Lab network
+
+# Service detection ports
+ports:
+  ssh: [22, 2222, 2200]
+  web: [80, 443, 8080, 8443, 3000, 8000, 9000]
+  docker: [2375, 2376, 2377]
+  database: [3306, 5432, 27017, 6379, 1433, 5984]
+  monitoring: [9100, 9090, 3000, 8086, 9093, 9094]
+  media: [8096, 32400, 7878, 8989, 8686, 9117]
+  dns: [53, 5335]
+  vpn: [1194, 51820, 500, 4500]
+  backup: [9200, 9300]
+  git: [3000, 8080, 9999]
+  file_sharing: [139, 445, 111, 2049]
+
+# Connection settings
+timeout: 3
+max_workers: 100
+ansible_user: "admin"
+ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o ConnectTimeout=10"
+
+# Host organization rules
+organization:
+  # Environment detection patterns
+  environments:
+    production:
+      patterns: ["prod", "prd", "p-"]
+      networks: ["192.168.1.0/24"]
+    development:
+      patterns: ["dev", "test", "staging", "lab"]
+      networks: ["192.168.2.0/24", "10.0.0.0/24"]
+
+  # Service-based grouping
+  service_groups:
+    webservers:
+      required_services: ["web"]
+      optional_services: ["docker"]
+
+    databases:
+      required_services: ["database"]
+
+    monitoring:
+      required_services: ["monitoring"]
+
+    media_servers:
+      required_services: ["media"]
+
+    infrastructure:
+      required_services: ["dns", "vpn", "backup"]
+
+# Custom host naming
+naming:
+  # Use hostname if available, otherwise generate from IP
+  prefer_hostname: true
+
+  # Fallback naming pattern for IP-based names
+  ip_pattern: "host-{ip_last_octet}"
+
+  # Custom overrides (IP -> custom name)
+  overrides:
+    "192.168.1.1": "router"
+    "192.168.1.10": "proxmox-host"
+    "192.168.1.20": "nas-server"
+
+# Discovery exclusions
+exclusions:
+  # Skip these IP addresses
+  skip_ips:
+    - "192.168.1.1" # Router
+    - "192.168.1.255" # Broadcast
+
+  # Skip hosts with only these services
+  skip_services:
+    - ["dns"] # Skip DNS-only hosts (likely routers/APs)
+
+# Scheduling for automated discovery
+automation:
+  # Enable periodic discovery
+  enabled: true
+
+  # How often to run discovery (cron format)
+  schedule: "0 */6 * * *" # Every 6 hours
+
+  # Backup old inventory before updating
+  backup_old: true
+
+  # Send notifications on changes
+  notify_on_changes: true
+  notify_email: "admin@homelab.local"

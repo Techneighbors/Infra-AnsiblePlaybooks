@@ -1,0 +1,139 @@
+---
+- name: Complete Homelab Infrastructure Setup
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # Setup phases configuration
+    setup_phases:
+      - name: "Security Hardening"
+        playbook: "security-hardening.yml"
+        enabled: "{{ enable_security | default(true) }}"
+        description: "Configure firewall, SSH, fail2ban, and system security"
+
+      - name: "System Updates"
+        playbook: "update-apt-packages.yml"
+        enabled: "{{ enable_updates | default(true) }}"
+        description: "Update and upgrade system packages"
+
+      - name: "Docker Installation"
+        playbook: "docker-setup.yml"
+        enabled: "{{ enable_docker | default(true) }}"
+        description: "Install and configure Docker with best practices"
+
+      - name: "Backup Solution"
+        playbook: "backup-setup.yml"
+        enabled: "{{ enable_backup | default(true) }}"
+        description: "Setup automated backup with restic"
+
+      - name: "Monitoring Stack"
+        playbook: "monitoring-setup.yml"
+        enabled: "{{ enable_monitoring | default(true) }}"
+        description: "Install Prometheus, Grafana, and Node Exporter"
+
+    # Target hosts configuration
+    target_inventory: "{{ inventory_file | default('inventory/example-hosts.yml') }}"
+
+    # Execution settings
+    check_mode: "{{ dry_run | default(false) }}"
+    parallel_execution: "{{ parallel | default(false) }}"
+
+  tasks:
+    - name: Display setup configuration
+      ansible.builtin.debug:
+        msg:
+          - "=== Homelab Complete Setup ==="
+          - "Target Inventory: {{ target_inventory }}"
+          - "Check Mode (Dry Run): {{ check_mode }}"
+          - "Parallel Execution: {{ parallel_execution }}"
+          - ""
+          - "Enabled Phases:"
+          - "{% for phase in setup_phases %}"
+          - "  - {{ phase.name }}: {{ 'ENABLED' if phase.enabled else 'DISABLED' }}"
+          - "{% endfor %}"
+      tags: always
+
+    - name: Verify inventory file exists
+      ansible.builtin.stat:
+        path: "{{ target_inventory }}"
+      register: inventory_check
+      failed_when: not inventory_check.stat.exists
+      tags: always
+
+    - name: Run setup phases sequentially
+      ansible.builtin.include_tasks: run_playbook.yml
+      loop: "{{ setup_phases }}"
+      loop_control:
+        loop_var: phase
+      when:
+        - phase.enabled | bool
+        - not parallel_execution | bool
+      tags: sequential
+
+    - name: Run setup phases in parallel
+      ansible.builtin.include_tasks: run_playbook.yml
+      loop: "{{ setup_phases }}"
+      loop_control:
+        loop_var: phase
+      async: 1800 # 30 minutes timeout
+      poll: 0
+      register: parallel_jobs
+      when:
+        - phase.enabled | bool
+        - parallel_execution | bool
+      tags: parallel
+
+    - name: Wait for parallel jobs to complete
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+      register: parallel_results
+      until: parallel_results.finished
+      retries: 60
+      delay: 30
+      loop: "{{ parallel_jobs.results }}"
+      when:
+        - parallel_execution | bool
+        - parallel_jobs is defined
+      tags: parallel
+
+    - name: Display parallel execution results
+      ansible.builtin.debug:
+        msg:
+          - "Phase: {{ item.phase.name }}"
+          - "Status: {{ 'COMPLETED' if item.finished else 'FAILED' }}"
+          - "Return Code: {{ item.rc | default('N/A') }}"
+      loop: "{{ parallel_results.results }}"
+      when:
+        - parallel_execution | bool
+        - parallel_results is defined
+      tags: parallel
+
+  post_tasks:
+    - name: Generate setup summary
+      ansible.builtin.template:
+        src: setup_summary.j2
+        dest: "/tmp/homelab-setup-summary-{{ ansible_date_time.epoch }}.txt"
+      vars:
+        setup_timestamp: "{{ ansible_date_time.iso8601 }}"
+        execution_mode: "{{ 'Parallel' if parallel_execution else 'Sequential' }}"
+        enabled_phases: "{{ setup_phases | selectattr('enabled') | list }}"
+      tags: summary
+
+    - name: Display completion message
+      ansible.builtin.debug:
+        msg:
+          - "=== Homelab Setup Complete ==="
+          - "Summary report: /tmp/homelab-setup-summary-{{ ansible_date_time.epoch }}.txt"
+          - ""
+          - "Next steps:"
+          - "1. Review service status: systemctl status <service>"
+          - "2. Check firewall: ufw status"
+          - "3. Access Grafana: http://<server-ip>:3000 (admin/admin123)"
+          - "4. Access Prometheus: http://<server-ip>:9090"
+          - "5. Test backup: sudo /usr/local/bin/backup-status.sh"
+          - "6. Review security: sudo fail2ban-client status"
+      tags: always
+
+---
+- name: Run individual playbook
+  ansible.builtin.include_tasks: file=run_playbook_task.yml
+  when: phase.enabled | bool

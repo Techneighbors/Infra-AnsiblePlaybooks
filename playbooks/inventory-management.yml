@@ -1,0 +1,246 @@
+---
+- name: Automated Inventory Management and Discovery
+  hosts: localhost
+  gather_facts: true
+  vars:
+    # Discovery configuration
+    discovery_script: "{{ playbook_dir }}/../scripts/dynamic_inventory.py"
+    discovery_config: "{{ playbook_dir }}/../config/discovery.yml"
+
+    # Output locations
+    discovered_inventory: "{{ playbook_dir }}/../inventory/discovered-hosts.yml"
+    backup_directory: "{{ playbook_dir }}/../inventory/backups"
+
+    # Integration settings
+    update_static_inventory: "{{ auto_update_static | default(true) }}"
+    backup_existing: "{{ backup_old_inventory | default(true) }}"
+    merge_with_manual: "{{ merge_manual_hosts | default(true) }}"
+    manual_inventory: "{{ playbook_dir }}/../inventory/manual-hosts.yml"
+
+    # Notification settings
+    notify_on_changes: "{{ send_notifications | default(false) }}"
+    notification_email: "{{ admin_email | default('') }}"
+
+  tasks:
+    - name: Ensure required directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ backup_directory }}"
+        - "{{ discovery_config | dirname }}"
+        - "{{ discovered_inventory | dirname }}"
+      tags: setup
+
+    - name: Install Python dependencies for discovery
+      ansible.builtin.pip:
+        name:
+          - pyyaml
+          - ipaddress
+        state: present
+      tags: dependencies
+
+    - name: Make discovery script executable
+      ansible.builtin.file:
+        path: "{{ discovery_script }}"
+        mode: "0755"
+      tags: setup
+
+    - name: Check if discovery configuration exists
+      ansible.builtin.stat:
+        path: "{{ discovery_config }}"
+      register: config_exists
+      tags: config
+
+    - name: Create default discovery configuration if missing
+      ansible.builtin.copy:
+        content: |
+          networks:
+            - "{{ ansible_default_ipv4.network }}/{{ ansible_default_ipv4.netmask }}"
+          ansible_user: "{{ ansible_user | default('admin') }}"
+          timeout: 3
+          max_workers: 50
+        dest: "{{ discovery_config }}"
+        mode: "0644"
+      when: not config_exists.stat.exists
+      tags: config
+
+    - name: Backup existing inventory
+      ansible.builtin.copy:
+        src: "{{ discovered_inventory }}"
+        dest: "{{ backup_directory }}/discovered-hosts-{{ ansible_date_time.epoch }}.yml"
+        remote_src: true
+        backup: false
+      when:
+        - backup_existing | bool
+        - discovered_inventory is file
+      ignore_errors: true
+      tags: backup
+
+    - name: Run network discovery
+      ansible.builtin.command:
+        cmd: "python3 {{ discovery_script }} --save {{ discovered_inventory }} --config {{ discovery_config }}"
+      register: discovery_result
+      changed_when: discovery_result.rc == 0
+      tags: discovery
+
+    - name: Display discovery results
+      ansible.builtin.debug:
+        msg: "{{ discovery_result.stdout_lines }}"
+      when: discovery_result.stdout_lines is defined
+      tags: discovery
+
+    - name: Load discovered inventory
+      ansible.builtin.include_vars:
+        file: "{{ discovered_inventory }}"
+        name: discovered_hosts
+      tags: analysis
+
+    - name: Load manual inventory for merging
+      ansible.builtin.include_vars:
+        file: "{{ manual_inventory }}"
+        name: manual_hosts
+      when:
+        - merge_with_manual | bool
+        - manual_inventory is file
+      ignore_errors: true
+      tags: merge
+
+    - name: Merge manual and discovered inventories
+      ansible.builtin.set_fact:
+        merged_inventory: "{{ discovered_hosts | combine(manual_hosts, recursive=True) }}"
+      when:
+        - merge_with_manual | bool
+        - manual_hosts is defined
+      tags: merge
+
+    - name: Use discovered inventory only
+      ansible.builtin.set_fact:
+        merged_inventory: "{{ discovered_hosts }}"
+      when: not (merge_with_manual | bool and manual_hosts is defined)
+      tags: merge
+
+    - name: Save merged inventory
+      ansible.builtin.copy:
+        content: "{{ merged_inventory | to_nice_yaml }}"
+        dest: "{{ discovered_inventory }}"
+        mode: "0644"
+        backup: true
+      when: update_static_inventory | bool
+      tags: save
+
+    - name: Generate inventory statistics
+      ansible.builtin.set_fact:
+        inventory_stats:
+          total_hosts: "{{ (merged_inventory._meta.hostvars | default({})).keys() | length }}"
+          groups: "{{ merged_inventory.keys() | reject('equalto', '_meta') | reject('equalto', 'all') | list }}"
+          discovery_timestamp: "{{ ansible_date_time.iso8601 }}"
+          discovered_services: "{{ merged_inventory._meta.hostvars.values() | map(attribute='detected_services') | flatten | unique | list }}"
+      tags: stats
+
+    - name: Display inventory statistics
+      ansible.builtin.debug:
+        msg:
+          - "=== Inventory Discovery Statistics ==="
+          - "Total Hosts Discovered: {{ inventory_stats.total_hosts }}"
+          - "Groups Created: {{ inventory_stats.groups | join(', ') }}"
+          - "Services Detected: {{ inventory_stats.discovered_services | join(', ') }}"
+          - "Discovery Time: {{ inventory_stats.discovery_timestamp }}"
+      tags: stats
+
+    - name: Create inventory report
+      ansible.builtin.template:
+        src: inventory_report.j2
+        dest: "{{ backup_directory }}/inventory-report-{{ ansible_date_time.epoch }}.html"
+        mode: "0644"
+      vars:
+        report_data:
+          stats: "{{ inventory_stats }}"
+          inventory: "{{ merged_inventory }}"
+          discovery_config: "{{ discovery_config }}"
+      tags: report
+
+    - name: Setup automated discovery cron job
+      ansible.builtin.cron:
+        name: "Homelab inventory discovery"
+        minute: "0"
+        hour: "*/6"
+        job: "cd {{ playbook_dir }} && ansible-playbook inventory-management.yml --extra-vars 'auto_update_static=true backup_old_inventory=true' > /var/log/inventory-discovery.log 2>&1"
+        user: "{{ ansible_user }}"
+        state: "{{ 'present' if enable_auto_discovery | default(false) else 'absent' }}"
+      tags: automation
+
+    - name: Configure inventory change monitoring
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # Inventory Change Monitor
+
+          INVENTORY_FILE="{{ discovered_inventory }}"
+          LAST_KNOWN="/tmp/inventory-checksum"
+
+          # Calculate current checksum
+          CURRENT_CHECKSUM=$(md5sum "$INVENTORY_FILE" 2>/dev/null | cut -d' ' -f1)
+
+          # Read last known checksum
+          LAST_CHECKSUM=""
+          if [[ -f "$LAST_KNOWN" ]]; then
+              LAST_CHECKSUM=$(cat "$LAST_KNOWN")
+          fi
+
+          # Check if inventory changed
+          if [[ "$CURRENT_CHECKSUM" != "$LAST_CHECKSUM" ]]; then
+              echo "Inventory changes detected!"
+              echo "Previous: $LAST_CHECKSUM"
+              echo "Current:  $CURRENT_CHECKSUM"
+              
+              # Save new checksum
+              echo "$CURRENT_CHECKSUM" > "$LAST_KNOWN"
+              
+              # Send notification if configured
+              {% if notify_on_changes and notification_email %}
+              echo "Homelab inventory has been updated. Check {{ discovered_inventory }} for details." | \
+                  mail -s "Homelab Inventory Update" {{ notification_email }}
+              {% endif %}
+              
+              exit 0
+          else
+              echo "No inventory changes detected"
+              exit 1
+          fi
+        dest: /usr/local/bin/inventory-change-monitor.sh
+        mode: "0755"
+      become: true
+      tags: monitoring
+
+  post_tasks:
+    - name: Display next steps
+      ansible.builtin.debug:
+        msg:
+          - "=== Inventory Management Complete ==="
+          - ""
+          - "📁 Files Created:"
+          - "  - Discovered inventory: {{ discovered_inventory }}"
+          - "  - Configuration: {{ discovery_config }}"
+          - "  - Report: {{ backup_directory }}/inventory-report-{{ ansible_date_time.epoch }}.html"
+          - ""
+          - "🔄 Usage Commands:"
+          - "  # Manual discovery:"
+          - "  python3 {{ discovery_script }} --list"
+          - ""
+          - "  # Save to static file:"
+          - "  python3 {{ discovery_script }} --save inventory/my-hosts.yml"
+          - ""
+          - "  # Use as dynamic inventory:"
+          - "  ansible-playbook -i {{ discovery_script }} playbook.yml"
+          - ""
+          - "  # Check for changes:"
+          - "  /usr/local/bin/inventory-change-monitor.sh"
+          - ""
+          - "⚙️  Configuration:"
+          - "  Edit {{ discovery_config }} to customize discovery"
+          - ""
+          - "📊 Statistics:"
+          - "  {{ inventory_stats.total_hosts }} hosts in {{ inventory_stats.groups | length }} groups"
+      tags: always

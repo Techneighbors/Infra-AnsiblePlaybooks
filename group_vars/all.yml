@@ -1,0 +1,19 @@
+---
+# Global variables for all hosts
+# These can be overridden in host_vars or more specific group_vars
+
+# Package update settings
+apt_upgrade_type: safe # Options: safe, full, dist
+apt_autoremove: true
+apt_autoclean: true
+
+# SSH and connection settings
+ansible_ssh_pipelining: true
+ansible_ssh_control_path: "/tmp/ansible-ssh-%%h-%%p-%%r"
+
+# Timeout settings
+ansible_timeout: 30
+ansible_gather_timeout: 10
+
+# Logging
+log_path: /var/log/ansible.log

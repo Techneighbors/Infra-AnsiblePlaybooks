@@ -1,0 +1,194 @@
+---
+- name: Install and configure Docker for homelab
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    docker_users: "{{ docker_privileged_users | default(['ubuntu', 'admin']) }}"
+    docker_compose_version: "{{ compose_version | default('2.24.5') }}"
+    docker_daemon_config:
+      log-driver: "json-file"
+      log-opts:
+        max-size: "10m"
+        max-file: "3"
+      storage-driver: "overlay2"
+      exec-opts:
+        - "native.cgroupdriver=systemd"
+
+  pre_tasks:
+    - name: Check if Docker is already installed
+      ansible.builtin.command: docker --version
+      register: docker_installed
+      failed_when: false
+      changed_when: false
+      tags: always
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+      tags: packages
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - software-properties-common
+        state: present
+      tags: packages
+
+    - name: Add Docker GPG key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+      when: ansible_distribution == 'Ubuntu'
+      tags: repository
+
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+      when: ansible_distribution == 'Ubuntu'
+      tags: repository
+
+    - name: Install Docker Engine
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+        state: present
+        update_cache: true
+      tags: packages
+
+    - name: Create docker group
+      ansible.builtin.group:
+        name: docker
+        state: present
+      tags: users
+
+    - name: Add users to docker group
+      ansible.builtin.user:
+        name: "{{ item }}"
+        groups: docker
+        append: true
+      loop: "{{ docker_users }}"
+      tags: users
+
+    - name: Create Docker daemon configuration directory
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        mode: "0755"
+      tags: config
+
+    - name: Configure Docker daemon
+      ansible.builtin.copy:
+        content: "{{ docker_daemon_config | to_nice_json }}"
+        dest: /etc/docker/daemon.json
+        mode: "0644"
+        backup: true
+      notify: restart docker
+      tags: config
+
+    - name: Enable and start Docker service
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+      tags: service
+
+    - name: Install Docker Compose
+      ansible.builtin.get_url:
+        url: "https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: "0755"
+        owner: root
+        group: root
+      tags: compose
+
+    - name: Create docker-compose symlink
+      ansible.builtin.file:
+        src: /usr/local/bin/docker-compose
+        dest: /usr/bin/docker-compose
+        state: link
+      tags: compose
+
+    - name: Create directories for container data
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      loop:
+        - /opt/docker
+        - /opt/docker/data
+        - /opt/docker/configs
+        - /opt/docker/compose
+      tags: directories
+
+    - name: Install useful Docker tools
+      ansible.builtin.apt:
+        name:
+          - ctop
+          - docker-clean
+        state: present
+      ignore_errors: true
+      tags: tools
+
+    - name: Configure log rotation for Docker
+      ansible.builtin.copy:
+        content: |
+          /var/lib/docker/containers/*/*.log {
+            rotate 7
+            daily
+            compress
+            size=1M
+            missingok
+            delaycompress
+            copytruncate
+          }
+        dest: /etc/logrotate.d/docker-containers
+        mode: "0644"
+      tags: logs
+
+    - name: Test Docker installation
+      ansible.builtin.command: docker run --rm hello-world
+      register: docker_test
+      changed_when: false
+      become_user: "{{ docker_users[0] }}"
+      become: true
+      tags: test
+
+    - name: Display Docker version
+      ansible.builtin.command: docker --version
+      register: docker_version
+      changed_when: false
+      tags: info
+
+    - name: Display Docker Compose version
+      ansible.builtin.command: docker-compose --version
+      register: compose_version_check
+      changed_when: false
+      tags: info
+
+    - name: Show installation results
+      ansible.builtin.debug:
+        msg:
+          - "Docker Version: {{ docker_version.stdout }}"
+          - "Docker Compose Version: {{ compose_version_check.stdout }}"
+          - "Test Result: {{ 'SUCCESS' if docker_test.rc == 0 else 'FAILED' }}"
+      tags: info
+
+  handlers:
+    - name: restart docker
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted

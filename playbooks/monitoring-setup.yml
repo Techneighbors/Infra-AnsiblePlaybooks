@@ -1,0 +1,378 @@
+---
+- name: Setup monitoring stack (Prometheus + Grafana + Node Exporter)
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # Monitoring configuration
+    monitoring_user: "{{ monitor_user | default('monitoring') }}"
+    monitoring_dir: "{{ monitor_base_dir | default('/opt/monitoring') }}"
+
+    # Prometheus configuration
+    prometheus_version: "{{ prom_version | default('2.48.1') }}"
+    prometheus_port: "{{ prom_port | default('9090') }}"
+
+    # Grafana configuration
+    grafana_version: "{{ grafana_release | default('10.2.3') }}"
+    grafana_port: "{{ grafana_web_port | default('3000') }}"
+    grafana_admin_password: "{{ grafana_password | default('admin123') }}"
+
+    # Node Exporter configuration
+    node_exporter_version: "{{ node_exp_version | default('1.7.0') }}"
+    node_exporter_port: "{{ node_exp_port | default('9100') }}"
+
+    # Alert configuration
+    alerting_enabled: "{{ enable_alerts | default(true) }}"
+    alert_email: "{{ notification_email | default('') }}"
+
+  pre_tasks:
+    - name: Create monitoring user
+      ansible.builtin.user:
+        name: "{{ monitoring_user }}"
+        system: true
+        shell: /bin/false
+        home: "{{ monitoring_dir }}"
+        create_home: false
+      tags: setup
+
+    - name: Create monitoring directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ monitoring_user }}"
+        group: "{{ monitoring_user }}"
+        mode: "0755"
+      loop:
+        - "{{ monitoring_dir }}"
+        - "{{ monitoring_dir }}/prometheus"
+        - "{{ monitoring_dir }}/prometheus/data"
+        - "{{ monitoring_dir }}/grafana"
+        - "{{ monitoring_dir }}/grafana/data"
+        - "{{ monitoring_dir }}/configs"
+        - /var/log/monitoring
+      tags: setup
+
+  tasks:
+    # Node Exporter Installation
+    - name: Download Node Exporter
+      ansible.builtin.get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+        dest: /tmp/node_exporter.tar.gz
+        mode: "0644"
+      tags: node_exporter
+
+    - name: Extract Node Exporter
+      ansible.builtin.unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /tmp
+        remote_src: true
+      tags: node_exporter
+
+    - name: Install Node Exporter binary
+      ansible.builtin.copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: /usr/local/bin/node_exporter
+        mode: "0755"
+        owner: root
+        group: root
+        remote_src: true
+      tags: node_exporter
+
+    - name: Create Node Exporter systemd service
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=Node Exporter
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User={{ monitoring_user }}
+          Group={{ monitoring_user }}
+          Type=simple
+          ExecStart=/usr/local/bin/node_exporter --web.listen-address=:{{ node_exporter_port }}
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/node_exporter.service
+        mode: "0644"
+      notify:
+        - reload systemd
+        - restart node_exporter
+      tags: node_exporter
+
+    # Prometheus Installation
+    - name: Download Prometheus
+      ansible.builtin.get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: /tmp/prometheus.tar.gz
+        mode: "0644"
+      tags: prometheus
+
+    - name: Extract Prometheus
+      ansible.builtin.unarchive:
+        src: /tmp/prometheus.tar.gz
+        dest: /tmp
+        remote_src: true
+      tags: prometheus
+
+    - name: Install Prometheus binaries
+      ansible.builtin.copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+        dest: "/usr/local/bin/{{ item }}"
+        mode: "0755"
+        owner: root
+        group: root
+        remote_src: true
+      loop:
+        - prometheus
+        - promtool
+      tags: prometheus
+
+    - name: Create Prometheus configuration
+      ansible.builtin.copy:
+        content: |
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+
+          rule_files:
+            - "rules/*.yml"
+
+          alerting:
+            alertmanagers:
+              - static_configs:
+                  - targets: []
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:{{ prometheus_port }}']
+
+            - job_name: 'node'
+              static_configs:
+                - targets: 
+          {% for host in groups['all'] %}
+                  - '{{ hostvars[host]['ansible_default_ipv4']['address'] }}:{{ node_exporter_port }}'
+          {% endfor %}
+        dest: "{{ monitoring_dir }}/prometheus/prometheus.yml"
+        owner: "{{ monitoring_user }}"
+        group: "{{ monitoring_user }}"
+        mode: "0644"
+      notify: restart prometheus
+      tags: prometheus
+
+    - name: Create Prometheus systemd service
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=Prometheus
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User={{ monitoring_user }}
+          Group={{ monitoring_user }}
+          Type=simple
+          ExecStart=/usr/local/bin/prometheus \
+            --config.file={{ monitoring_dir }}/prometheus/prometheus.yml \
+            --storage.tsdb.path={{ monitoring_dir }}/prometheus/data \
+            --web.console.templates=/etc/prometheus/consoles \
+            --web.console.libraries=/etc/prometheus/console_libraries \
+            --web.listen-address=0.0.0.0:{{ prometheus_port }} \
+            --storage.tsdb.retention.time=30d
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/prometheus.service
+        mode: "0644"
+      notify:
+        - reload systemd
+        - restart prometheus
+      tags: prometheus
+
+    # Grafana Installation
+    - name: Install Grafana dependencies
+      ansible.builtin.apt:
+        name:
+          - adduser
+          - libfontconfig1
+        state: present
+      tags: grafana
+
+    - name: Download Grafana
+      ansible.builtin.get_url:
+        url: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_amd64.deb"
+        dest: /tmp/grafana.deb
+        mode: "0644"
+      tags: grafana
+
+    - name: Install Grafana
+      ansible.builtin.apt:
+        deb: /tmp/grafana.deb
+        state: present
+      tags: grafana
+
+    - name: Configure Grafana
+      ansible.builtin.lineinfile:
+        path: /etc/grafana/grafana.ini
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        backup: true
+      loop:
+        - { regexp: "^;?http_port", line: "http_port = {{ grafana_port }}" }
+        - {
+            regexp: "^;?domain",
+            line: "domain = {{ ansible_default_ipv4.address }}",
+          }
+        - {
+            regexp: "^;?admin_password",
+            line: "admin_password = {{ grafana_admin_password }}",
+          }
+      notify: restart grafana
+      tags: grafana
+
+    # Basic alert rules
+    - name: Create Prometheus alert rules directory
+      ansible.builtin.file:
+        path: "{{ monitoring_dir }}/prometheus/rules"
+        state: directory
+        owner: "{{ monitoring_user }}"
+        group: "{{ monitoring_user }}"
+        mode: "0755"
+      tags: alerts
+
+    - name: Create basic alert rules
+      ansible.builtin.copy:
+        content: |
+          groups:
+            - name: homelab_alerts
+              rules:
+                - alert: InstanceDown
+                  expr: up == 0
+                  for: 5m
+                  labels:
+                    severity: critical
+                  annotations:
+                    summary: "Instance {{ $labels.instance }} down"
+                    description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 5 minutes."
+
+                - alert: HighCPUUsage
+                  expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+                  for: 5m
+                  labels:
+                    severity: warning
+                  annotations:
+                    summary: "High CPU usage on {{ $labels.instance }}"
+                    description: "CPU usage is above 80% for more than 5 minutes."
+
+                - alert: HighMemoryUsage
+                  expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+                  for: 5m
+                  labels:
+                    severity: warning
+                  annotations:
+                    summary: "High memory usage on {{ $labels.instance }}"
+                    description: "Memory usage is above 85% for more than 5 minutes."
+
+                - alert: LowDiskSpace
+                  expr: (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"}) * 100 < 10
+                  for: 5m
+                  labels:
+                    severity: critical
+                  annotations:
+                    summary: "Low disk space on {{ $labels.instance }}"
+                    description: "Disk space is below 10% on {{ $labels.mountpoint }}."
+        dest: "{{ monitoring_dir }}/prometheus/rules/homelab.yml"
+        owner: "{{ monitoring_user }}"
+        group: "{{ monitoring_user }}"
+        mode: "0644"
+      notify: restart prometheus
+      tags: alerts
+
+    # Service management
+    - name: Enable and start monitoring services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+        daemon_reload: true
+      loop:
+        - node_exporter
+        - prometheus
+        - grafana-server
+      tags: services
+
+    # Firewall configuration
+    - name: Configure firewall for monitoring ports
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "{{ prometheus_port }}"
+        - "{{ grafana_port }}"
+        - "{{ node_exporter_port }}"
+      tags: firewall
+
+    # Create monitoring dashboard script
+    - name: Create monitoring status script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # Monitoring Status Script
+
+          echo "=== Monitoring Services Status ==="
+          systemctl status node_exporter --no-pager -l
+          echo ""
+          systemctl status prometheus --no-pager -l
+          echo ""
+          systemctl status grafana-server --no-pager -l
+
+          echo -e "\n=== Service URLs ==="
+          echo "Prometheus: http://{{ ansible_default_ipv4.address }}:{{ prometheus_port }}"
+          echo "Grafana: http://{{ ansible_default_ipv4.address }}:{{ grafana_port }}"
+          echo "Node Exporter: http://{{ ansible_default_ipv4.address }}:{{ node_exporter_port }}/metrics"
+
+          echo -e "\n=== Prometheus Targets Status ==="
+          curl -s "http://localhost:{{ prometheus_port }}/api/v1/targets" | python3 -m json.tool 2>/dev/null || echo "Failed to get targets"
+        dest: /usr/local/bin/monitoring-status.sh
+        mode: "0755"
+      tags: monitoring
+
+  handlers:
+    - name: reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: restart node_exporter
+      ansible.builtin.systemd:
+        name: node_exporter
+        state: restarted
+
+    - name: restart prometheus
+      ansible.builtin.systemd:
+        name: prometheus
+        state: restarted
+
+    - name: restart grafana
+      ansible.builtin.systemd:
+        name: grafana-server
+        state: restarted
+
+  post_tasks:
+    - name: Display monitoring information
+      ansible.builtin.debug:
+        msg:
+          - "Monitoring stack installation completed!"
+          - "Grafana URL: http://{{ ansible_default_ipv4.address }}:{{ grafana_port }}"
+          - "Default login: admin / {{ grafana_admin_password }}"
+          - "Prometheus URL: http://{{ ansible_default_ipv4.address }}:{{ prometheus_port }}"
+          - "Node Exporter URL: http://{{ ansible_default_ipv4.address }}:{{ node_exporter_port }}/metrics"
+          - "Run 'monitoring-status.sh' to check service status"
+      tags: info
