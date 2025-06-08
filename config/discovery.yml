@@ -4,8 +4,8 @@
 # Networks to scan for hosts
 networks:
   - "192.168.1.0/24" # Main home network
-  - "192.168.2.0/24" # IoT/guest network
-  - "10.0.0.0/24" # Lab network
+  - "10.2.10.0/24" # Primary lab network
+  - "10.0.0.0/24" # Secondary lab network
 
 # Service detection ports
 ports:
@@ -24,7 +24,7 @@ ports:
 # Connection settings
 timeout: 3
 max_workers: 100
-ansible_user: "admin"
+ansible_user: "kyle7"
 ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o ConnectTimeout=10"
 
 # Host organization rules
