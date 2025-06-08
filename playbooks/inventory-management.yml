@@ -94,7 +94,6 @@
           - "STDERR: {{ discovery_result.stderr | default('No errors') }}"
           - "Command: python3 {{ discovery_script }} --save {{ discovered_inventory }} --config {{ discovery_config }}"
       when: discovery_result is defined
-      tags: always
 
     - name: Test basic network connectivity
       ansible.builtin.command:
@@ -104,7 +103,6 @@
       loop:
         - "192.168.1.10"
         - "10.2.10.36"
-      tags: always
 
     - name: Display network connectivity test
       ansible.builtin.debug:
@@ -113,7 +111,37 @@
           - "Ping results: {{ ping_results.results | map(attribute='rc') | list }}"
           - "Can reach 192.168.1.10: {{ ping_results.results[0].rc == 0 }}"
           - "Can reach 10.2.10.36: {{ ping_results.results[1].rc == 0 }}"
-      tags: always
+
+    - name: Test SSH connectivity to known hosts
+      ansible.builtin.command:
+        cmd: "nc -z -w 5 {{ item }} 22"
+      register: ssh_test_results
+      ignore_errors: true
+      loop:
+        - "192.168.1.10"
+        - "10.2.10.36"
+
+    - name: Display SSH connectivity test
+      ansible.builtin.debug:
+        msg:
+          - "=== SSH Port Test ==="
+          - "SSH port 22 results: {{ ssh_test_results.results | map(attribute='rc') | list }}"
+          - "SSH accessible on 192.168.1.10:22: {{ ssh_test_results.results[0].rc == 0 }}"
+          - "SSH accessible on 10.2.10.36:22: {{ ssh_test_results.results[1].rc == 0 }}"
+
+    - name: Debug - Run discovery script with --list to see what it finds
+      ansible.builtin.command:
+        cmd: "python3 {{ discovery_script }} --list --config {{ discovery_config }}"
+      register: discovery_debug_result
+      ignore_errors: true
+
+    - name: Display discovery debug results
+      ansible.builtin.debug:
+        msg:
+          - "=== Discovery Debug Results ==="
+          - "Return Code: {{ discovery_debug_result.rc | default('undefined') }}"
+          - "STDOUT: {{ discovery_debug_result.stdout | default('No output') }}"
+          - "STDERR: {{ discovery_debug_result.stderr | default('No errors') }}"
 
     - name: Check if discovered inventory exists
       ansible.builtin.stat:
@@ -200,6 +228,7 @@
           stats: "{{ inventory_stats }}"
           inventory: "{{ merged_inventory }}"
           discovery_config: "{{ discovery_config }}"
+      ignore_errors: true
       tags: report
 
     - name: Setup automated discovery cron job
