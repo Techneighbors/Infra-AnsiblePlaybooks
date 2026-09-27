@@ -283,6 +283,7 @@
         dest: /usr/local/bin/inventory-change-monitor.sh
         mode: "0755"
       become: true
+      when: enable_monitoring | default(false) | bool
       tags: monitoring
 
   post_tasks:
