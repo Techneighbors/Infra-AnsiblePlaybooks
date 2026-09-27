@@ -13,6 +13,7 @@ from pathlib import Path
 import concurrent.futures
 from typing import Dict, List, Set
 import ipaddress
+import sys
 
 class HomelabInventory:
     def __init__(self, config_file='config/discovery.yml'):
@@ -103,7 +104,7 @@ class HomelabInventory:
         all_hosts = []
         
         for network in self.config['networks']:
-            print(f"Scanning network: {network}")
+            print(f"Scanning network: {network}", file=sys.stderr)
             network_obj = ipaddress.IPv4Network(network, strict=False)
             
             # Use ThreadPoolExecutor for parallel scanning
@@ -117,7 +118,10 @@ class HomelabInventory:
                     result = future.result()
                     if result:
                         all_hosts.append(result)
-                        print(f"Found host: {result['ip']} ({result.get('hostname', 'unknown')})")
+                        print(
+                            f"Found host: {result['ip']} ({result.get('hostname', 'unknown')})",
+                            file=sys.stderr,
+                        )
         
         return all_hosts
 

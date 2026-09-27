@@ -1,14 +1,19 @@
-tasks:
-  - name: Update packages with aptAdd commentMore actions
-    become: yes
-    become_user: root
-    when: ansible_pkg_mgr == 'apt'
-    ansible.builtin.apt:
-      update_cache: true
+---
+- name: Update apt packages (legacy)
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Update packages with apt
+      become: true
+      become_user: root
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        update_cache: true
 
-  - name: Upgrade packages with apt
-    become: yes
-    become_user: root
-    when: ansible_pkg_mgr == 'apt'
-    ansible.builtin.apt:
-      upgrade: dist
+    - name: Upgrade packages with apt
+      become: true
+      become_user: root
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        upgrade: dist
