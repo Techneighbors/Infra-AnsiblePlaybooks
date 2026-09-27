@@ -20,6 +20,7 @@
     # Notification settings
     notify_on_changes: "{{ send_notifications | default(false) }}"
     notification_email: "{{ admin_email | default('') }}"
+    discovery_cron_user: "{{ ansible_user | default(ansible_facts.user_id) }}"
 
   tasks:
     - name: Ensure required directories exist
@@ -220,7 +221,7 @@
 
     - name: Create inventory report
       ansible.builtin.template:
-        src: inventory_report.j2
+        src: "{{ playbook_dir }}/../templates/inventory_report.j2"
         dest: "{{ backup_directory }}/inventory-report-{{ ansible_date_time.epoch }}.html"
         mode: "0644"
       vars:
@@ -237,7 +238,7 @@
         minute: "0"
         hour: "*/6"
         job: "cd {{ playbook_dir }} && ansible-playbook inventory-management.yml --extra-vars 'auto_update_static=true backup_old_inventory=true' > /var/log/inventory-discovery.log 2>&1"
-        user: "{{ ansible_user }}"
+        user: "{{ discovery_cron_user }}"
         state: "{{ 'present' if enable_auto_discovery | default(false) else 'absent' }}"
       tags: automation
 
@@ -313,4 +314,5 @@
           - ""
           - "📊 Statistics:"
           - "  {{ inventory_stats.total_hosts }} hosts in {{ inventory_stats.groups | length }} groups"
+      when: inventory_stats is defined
       tags: always
