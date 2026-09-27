@@ -1,0 +1,192 @@
+---
+- name: Scheduled Homelab Health Check
+  hosts: all
+  gather_facts: true
+  become: false
+
+  vars:
+    health_disk_warn_percent: 80
+    health_disk_critical_percent: 90
+    health_memory_warn_percent: 85
+    health_backup_max_age_hours: 36
+    health_backup_path: /var/log/homelab-backup.log
+    health_report_directory: "{{ playbook_dir }}/../health-reports"
+    health_check_docker: true
+    health_check_backup: true
+    health_check_monitoring: true
+    health_monitoring_ports:
+      - 9090
+      - 3000
+      - 9100
+
+  tasks:
+    - name: Collect service facts
+      ansible.builtin.service_facts:
+      tags: services
+
+    - name: Check root filesystem usage
+      ansible.builtin.set_fact:
+        health_root_mount: "{{ (ansible_mounts | selectattr('mount', 'equalto', '/') | list | first) | default({}) }}"
+      tags: disk
+
+    - name: Check reboot requirement
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: health_reboot_required
+      tags: updates
+
+    - name: Check Docker daemon
+      ansible.builtin.command: systemctl is-active docker
+      register: health_docker_service
+      changed_when: false
+      failed_when: false
+      when: health_check_docker | bool
+      tags: docker
+
+    - name: Check unhealthy Docker containers
+      ansible.builtin.command: docker ps --filter health=unhealthy --quiet
+      register: health_unhealthy_containers
+      changed_when: false
+      failed_when: false
+      when:
+        - health_check_docker | bool
+        - health_docker_service.rc == 0
+      tags: docker
+
+    - name: Build Docker health result
+      ansible.builtin.set_fact:
+        health_docker_result:
+          installed: "{{ health_docker_service is defined and health_docker_service.rc in [0, 3] }}"
+          running: "{{ health_docker_service is defined and health_docker_service.rc == 0 }}"
+          unhealthy_containers: "{{ health_unhealthy_containers.stdout_lines | default([]) }}"
+      when: health_check_docker | bool
+      tags: docker
+
+    - name: Check backup freshness
+      ansible.builtin.stat:
+        path: "{{ health_backup_path }}"
+      register: health_backup_log
+      when: health_check_backup | bool
+      tags: backup
+
+    - name: Check local monitoring endpoints
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ item }}"
+        method: GET
+        timeout: 5
+        status_code:
+          - 200
+          - 401
+          - 403
+      loop: "{{ health_monitoring_ports }}"
+      register: health_monitoring
+      failed_when: false
+      when: health_check_monitoring | bool
+      tags: monitoring
+
+    - name: Calculate health metrics
+      ansible.builtin.set_fact:
+        health_disk_percent: >-
+          {{ ((health_root_mount.size_total | default(0) | float - health_root_mount.size_available | default(0) | float)
+          / (health_root_mount.size_total | default(1) | float) * 100) | round(1) }}
+        health_memory_percent: >-
+          {{ ((ansible_memtotal_mb | default(0) | float - ansible_memfree_mb | default(0) | float)
+          / (ansible_memtotal_mb | default(1) | float) * 100) | round(1) }}
+        health_failed_services: >-
+          {{ ansible_facts.services | dict2items
+          | selectattr('value.state', 'equalto', 'failed') | map(attribute='key') | list }}
+        health_backup_age_hours: >-
+          {{ (((ansible_date_time.epoch | int - (health_backup_log.stat.mtime | int)) / 3600) | round(1))
+          if health_check_backup | bool and health_backup_log.stat.exists | default(false) else none }}
+        health_monitoring_failed_ports: >-
+          {{ health_monitoring.results | default([]) | rejectattr('status', 'defined')
+          | map(attribute='item') | list }}
+      tags: report
+
+    - name: Build host health report
+      ansible.builtin.set_fact:
+        health_report:
+          hostname: "{{ ansible_hostname }}"
+          address: "{{ ansible_default_ipv4.address | default('unknown') }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          uptime_seconds: "{{ ansible_uptime_seconds | default(0) }}"
+          disk_usage_percent: "{{ health_disk_percent }}"
+          memory_usage_percent: "{{ health_memory_percent }}"
+          reboot_required: "{{ health_reboot_required.stat.exists }}"
+          failed_services: "{{ health_failed_services }}"
+          docker: "{{ health_docker_result | default({}) }}"
+          backup:
+            log_path: "{{ health_backup_path }}"
+            present: "{{ health_backup_log.stat.exists | default(false) }}"
+            age_hours: "{{ health_backup_age_hours }}"
+          monitoring:
+            checked_ports: "{{ health_monitoring_ports if health_check_monitoring | bool else [] }}"
+            reachable_ports: >-
+              {{ health_monitoring.results | default([]) | selectattr('status', 'defined')
+              | selectattr('status', 'in', [200, 401, 403]) | map(attribute='item') | list }}
+            failed_ports: "{{ health_monitoring_failed_ports }}"
+      tags: report
+
+    - name: Evaluate host health
+      ansible.builtin.set_fact:
+        health_critical_reasons: >-
+          {{ (["root filesystem usage is " ~ health_disk_percent ~ "%"] if health_disk_percent | float >= health_disk_critical_percent else [])
+          + (["failed services: " ~ (health_failed_services | join(', '))] if health_failed_services | length > 0 else [])
+          + (["unhealthy Docker containers: " ~ (health_docker_result.unhealthy_containers | join(', '))] if health_docker_result is defined and health_docker_result.unhealthy_containers | length > 0 else [])
+          + (["backup log is missing"] if health_check_backup | bool and not health_backup_log.stat.exists | default(false) else [])
+          + (["backup log is " ~ health_backup_age_hours ~ " hours old"] if health_check_backup | bool and health_backup_log.stat.exists | default(false) and health_backup_age_hours | float > health_backup_max_age_hours else []) }}
+        health_warning_reasons: >-
+          {{ (["root filesystem usage is " ~ health_disk_percent ~ "%"] if health_disk_percent | float >= health_disk_warn_percent and health_disk_percent | float < health_disk_critical_percent else [])
+          + (["memory usage is " ~ health_memory_percent ~ "%"] if health_memory_percent | float >= health_memory_warn_percent else [])
+          + (["reboot required"] if health_reboot_required.stat.exists else [])
+          + (["monitoring ports unavailable: " ~ (health_monitoring_failed_ports | join(', '))] if health_monitoring_failed_ports | length > 0 else []) }}
+      tags: report
+
+    - name: Set overall health status
+      ansible.builtin.set_fact:
+        health_status: "{{ 'critical' if health_critical_reasons | length > 0 else ('warning' if health_warning_reasons | length > 0 else 'healthy') }}"
+      tags: report
+
+    - name: Ensure local health report directory exists
+      ansible.builtin.file:
+        path: "{{ health_report_directory }}"
+        state: directory
+        mode: "0750"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      tags: report
+
+    - name: Write host health report
+      ansible.builtin.copy:
+        content: "{{ health_report | combine({'status': health_status, 'critical_reasons': health_critical_reasons, 'warning_reasons': health_warning_reasons}) | to_nice_json }}\n"
+        dest: "{{ health_report_directory }}/{{ inventory_hostname | regex_replace('[^A-Za-z0-9_.-]', '_') }}-{{ ansible_date_time.epoch }}.json"
+        mode: "0640"
+      delegate_to: localhost
+      become: false
+      tags: report
+
+    - name: Display health result
+      ansible.builtin.debug:
+        msg:
+          host: "{{ ansible_hostname }}"
+          status: "{{ health_status }}"
+          critical_reasons: "{{ health_critical_reasons }}"
+          warning_reasons: "{{ health_warning_reasons }}"
+      tags: report
+
+    - name: Fail unhealthy host checks
+      ansible.builtin.fail:
+        msg: "Critical health issues on {{ ansible_hostname }}: {{ health_critical_reasons | join('; ') }}"
+      when: health_status == 'critical'
+      tags: validation
+
+  post_tasks:
+    - name: Display health check completion
+      ansible.builtin.debug:
+        msg:
+          - "Health check completed for {{ ansible_play_hosts | length }} hosts"
+          - "JSON reports: {{ health_report_directory }}"
+          - "Critical hosts fail the task; warnings are reported without failing"
+      run_once: true
+      tags: always
